@@ -34,11 +34,12 @@ class ProjectsViewModel @Inject constructor(
     }
 
     fun searchProjects(term: String) {
+        _projectsStateFlow.value = PagingData.empty()
         projectsJob?.cancel()
         projectsJob = viewModelScope.launch(Dispatchers.IO) {
             projectRepository.getProjects(term).cachedIn(this).collect {
-                    _projectsStateFlow.value = it
-                }
+                _projectsStateFlow.value = it
+            }
         }
     }
 }

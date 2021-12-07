@@ -1,67 +1,58 @@
 package com.locker.kickstarterapp
 
 import android.app.Activity
-import android.content.res.Configuration
 import android.os.Bundle
-import android.os.Process
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.GridCells
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyVerticalGrid
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.*
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.coroutineScope
+import androidx.lifecycle.viewModelScope
 import androidx.paging.CombinedLoadStates
 import androidx.paging.LoadState
-import androidx.paging.PagingData
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import coil.annotation.ExperimentalCoilApi
-import coil.compose.ImagePainter
 import coil.compose.rememberImagePainter
-import coil.size.OriginalSize
-import coil.size.PixelSize
 import coil.size.Scale
-import coil.transform.CircleCropTransformation
 import com.locker.kickstarterapp.model.Project
 import com.locker.kickstarterapp.ui.theme.KickstarterAppTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
-import kotlin.system.exitProcess
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private val projectsViewModel by viewModels<ProjectsViewModel>()
 
+    @ExperimentalAnimationApi
     @ExperimentalCoilApi
     @ExperimentalFoundationApi
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,21 +73,59 @@ fun Greeting(name: String) {
     Text(text = "Hello $name!")
 }
 
+@ExperimentalAnimationApi
 @ExperimentalCoilApi
 @ExperimentalFoundationApi
 @Composable
 fun ProjectsScreen(viewModel: ProjectsViewModel) {
-    val projects = viewModel.projectsStateFlow.collectAsLazyPagingItems()
-    ProjectsScreen(projects)
+    Column {
+        SearchBar(viewModel)
+
+        val projects = viewModel.projectsStateFlow.collectAsLazyPagingItems()
+        ProjectsScreen(projects)
+    }
+}
+
+@Composable
+fun SearchBar(viewModel: ProjectsViewModel) {
+    var text by remember { mutableStateOf("") }
+    val focusManager = LocalFocusManager.current
+    val focusRequester = remember { FocusRequester() }
+
+    TextField(
+        value = text,
+        colors = TextFieldDefaults.textFieldColors(
+            backgroundColor = Color.Transparent
+        ),
+        leadingIcon = { Icon(Icons.Filled.Search, "search") },
+        trailingIcon = {
+            IconButton(onClick = { focusRequester.requestFocus().also { text = "" } }) {
+                Icon(Icons.Filled.Clear, "clear")
+            }
+        },
+        label = { Text("Search Projects") },
+        modifier = Modifier
+            .focusRequester(focusRequester)
+            .fillMaxWidth()
+            .padding(PaddingValues(top = 8.dp, start = 8.dp, end = 8.dp)),
+        onValueChange = { text = it },
+        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }, onSearch = {
+            viewModel.searchProjects(text).also {
+                focusManager.clearFocus()
+            }
+        }),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)
+    )
 }
 
 @ExperimentalCoilApi
 @ExperimentalFoundationApi
 @Composable
 fun ProjectsScreen(projects: LazyPagingItems<Project>) {
-    val lazyListState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val activity = LocalContext.current as? Activity
+    val lazyListState = rememberLazyListState()
+
     BackHandler {
         if (lazyListState.firstVisibleItemIndex == 0 && lazyListState.firstVisibleItemScrollOffset == 0) {
             activity?.finish()
@@ -105,16 +134,15 @@ fun ProjectsScreen(projects: LazyPagingItems<Project>) {
             lazyListState.animateScrollToItem(0)
         }
     }
-    if (projects.itemCount > 0) {
-        LazyColumn(state = lazyListState, modifier = Modifier.padding(PaddingValues(4.dp))) {
-            items(
-                projects.itemCount + 1,
-                { if (it >= 0 && it < projects.itemCount) projects[it]!!.id else it }) {
-                if (it >= 0 && it < projects.itemCount) {
-                    ProjectListItem(project = projects[it]!!)
-                } else if (it >= projects.itemCount) {
-                    AppendLoadStateListItem(loadState = projects.loadState.append)
-                }
+
+    LazyColumn(state = lazyListState, modifier = Modifier.padding(PaddingValues(4.dp))) {
+        items(
+            projects.itemCount + 1,
+            { if (it >= 0 && it < projects.itemCount) projects[it]!!.id else it }) {
+            if (it >= 0 && it < projects.itemCount) {
+                ProjectListItem(project = projects[it]!!)
+            } else if (it >= projects.itemCount) {
+                LoadStateListItem(projects.loadState)
             }
         }
     }
@@ -173,8 +201,10 @@ fun ProjectListItem(project: Project) {
 }
 
 @Composable
-fun AppendLoadStateListItem(loadState: LoadState) {
-    if (loadState is LoadState.Loading) {
+fun LoadStateListItem(combinedLoadStates: CombinedLoadStates) {
+    if (combinedLoadStates.append is LoadState.Loading ||
+        combinedLoadStates.refresh is LoadState.Loading
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
