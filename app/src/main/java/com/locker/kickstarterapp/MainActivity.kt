@@ -2,11 +2,14 @@ package com.locker.kickstarterapp
 
 import android.app.Activity
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.*
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -45,6 +48,7 @@ import coil.size.Scale
 import com.locker.kickstarterapp.model.Project
 import com.locker.kickstarterapp.ui.theme.KickstarterAppTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
@@ -79,59 +83,81 @@ fun Greeting(name: String) {
 @Composable
 fun ProjectsScreen(viewModel: ProjectsViewModel) {
     Column {
-        SearchBar(viewModel)
+        val lazyListState = rememberLazyListState()
+
+        SearchBar(viewModel, lazyListState)
 
         val projects = viewModel.projectsStateFlow.collectAsLazyPagingItems()
-        ProjectsScreen(projects)
+        ProjectsScreen(projects, lazyListState)
     }
 }
 
+@ExperimentalAnimationApi
 @Composable
-fun SearchBar(viewModel: ProjectsViewModel) {
+fun SearchBar(viewModel: ProjectsViewModel, lazyListState: LazyListState) {
     var text by remember { mutableStateOf("") }
     val focusManager = LocalFocusManager.current
     val focusRequester = remember { FocusRequester() }
 
-    TextField(
-        value = text,
-        colors = TextFieldDefaults.textFieldColors(
-            backgroundColor = Color.Transparent
-        ),
-        leadingIcon = { Icon(Icons.Filled.Search, "search") },
-        trailingIcon = {
-            IconButton(onClick = { focusRequester.requestFocus().also { text = "" } }) {
-                Icon(Icons.Filled.Clear, "clear")
-            }
-        },
-        label = { Text("Search Projects") },
-        modifier = Modifier
-            .focusRequester(focusRequester)
-            .fillMaxWidth()
-            .padding(PaddingValues(top = 8.dp, start = 8.dp, end = 8.dp)),
-        onValueChange = { text = it },
-        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }, onSearch = {
-            viewModel.searchProjects(text).also {
-                focusManager.clearFocus()
-            }
-        }),
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)
-    )
+
+    var visible by remember { mutableStateOf(true) }
+    if (lazyListState.isScrollingUp()) {
+        visible = true
+    } else if (lazyListState.isScrollingDown()) {
+        visible = false
+    }
+
+    AnimatedVisibility(
+        visible,
+        enter = fadeIn() + expandVertically(),
+        exit = fadeOut() + shrinkVertically()
+    ) {
+        TextField(
+            value = text,
+            colors = TextFieldDefaults.textFieldColors(
+                backgroundColor = Color.Transparent
+            ),
+            leadingIcon = { Icon(Icons.Filled.Search, "search") },
+            trailingIcon = {
+                IconButton(onClick = { focusRequester.requestFocus().also { text = "" } }) {
+                    Icon(Icons.Filled.Clear, "clear")
+                }
+            },
+            label = { Text("Search Projects") },
+            modifier = Modifier
+                .focusRequester(focusRequester)
+                .fillMaxWidth()
+                .padding(PaddingValues(top = 8.dp, start = 8.dp, end = 8.dp)),
+            onValueChange = { text = it },
+            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }, onSearch = {
+                viewModel.searchProjects(text).also {
+                    focusManager.clearFocus()
+                }
+                viewModel.viewModelScope.launch {
+                    lazyListState.scrollToItem(0)
+                }
+            }),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)
+        )
+    }
+
 }
 
 @ExperimentalCoilApi
 @ExperimentalFoundationApi
 @Composable
-fun ProjectsScreen(projects: LazyPagingItems<Project>) {
+fun ProjectsScreen(projects: LazyPagingItems<Project>, lazyListState: LazyListState) {
     val coroutineScope = rememberCoroutineScope()
     val activity = LocalContext.current as? Activity
-    val lazyListState = rememberLazyListState()
+
 
     BackHandler {
         if (lazyListState.firstVisibleItemIndex == 0 && lazyListState.firstVisibleItemScrollOffset == 0) {
             activity?.finish()
         }
         coroutineScope.launch {
-            lazyListState.animateScrollToItem(0)
+            lazyListState.animateScrollToItem(Math.max(0, lazyListState.firstVisibleItemIndex - 10))
+            lazyListState.scrollToItem(0)
         }
     }
 
